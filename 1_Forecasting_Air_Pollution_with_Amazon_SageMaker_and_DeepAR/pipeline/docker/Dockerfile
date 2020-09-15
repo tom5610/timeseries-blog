@@ -1,9 +1,10 @@
 
 FROM python:3.7-slim-buster
     
-COPY ./sql /opt/ml/processing/
+COPY ./sql /opt/ml/processing/sql
     
-RUN pip install PyAthena[Pandas] geopandas scikit-learn
+RUN pip install pandas numpy geopandas scikit-learn fsspec s3fs boto3
+
 ENV PYTHONUNBUFFERED=TRUE
 
 ENTRYPOINT ["python3"]

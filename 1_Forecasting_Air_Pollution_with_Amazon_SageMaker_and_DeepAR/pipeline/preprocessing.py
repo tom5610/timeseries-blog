@@ -1,9 +1,8 @@
-
 import argparse
 import os
 import warnings
 
-import boto3, time, s3fs, json, warnings, os
+import boto3, time, json, warnings, os, re
 import urllib.request
 from datetime import date, timedelta
 import numpy as np
@@ -24,19 +23,14 @@ prediction_length = 48
 # context length is how many prior time steps the predictor needs to make a prediction
 context_length = 3
 
-warnings.filterwarning('ignore')
+warnings.filterwarnings('ignore')
 
-session = boto3.Session()
-sagemaker_session = sagemaker.Session()
-region = session.region_name
-account = session.client('sts').get_caller_identity().get('Account')
-bucket_name = f"{account_id}-openaq-lab"
-athena_s3_staging_dir = f's3://{bucket_name}/athena/results/'
 
-s3 = boto3.client('s3')
-
-# @todo to evaluate whether we should store existing model.tar.gz onto s3 bucket.
-
+def get_athena_s3_staging_dir():
+    session = boto3.Session()
+    account_id = session.client('sts').get_caller_identity().get('Account')
+    return f's3://{account_id}-openaq-lab/athena/results/'
+    
 # processing Athena
 def athena_query_table(query_file, wait=None):
     results_uri = athena_execute(query_file, 'csv', wait)
@@ -47,13 +41,13 @@ def athena_execute(query_file, ext, wait):
         query_str = f.read()  
         
     athena = boto3.client('athena')
-    s3_dest = athena_s3_staging_dir
+    s3_dest = get_athena_s3_staging_dir()
     query_id = athena.start_query_execution(
         QueryString= query_str, 
-         ResultConfiguration={'OutputLocation': athena_s3_staging_dir}
+         ResultConfiguration={'OutputLocation': s3_dest}
     )['QueryExecutionId']
         
-    results_uri = f'{athena_s3_staging_dir}{query_id}.{ext}'
+    results_uri = f'{s3_dest}{query_id}.{ext}'
         
     start = time.time()
     while wait == None or wait == 0 or time.time() - start < wait:
@@ -70,18 +64,30 @@ def athena_execute(query_file, ext, wait):
 
     return results_uri       
 
+def map_s3_bucket_path(s3_uri):
+    pattern = re.compile('^s3://([^/]+)/(.*?([^/]+)/?)$')
+    value = pattern.match(s3_uri)
+    return value.group(1), value.group(2)
+
 def get_sydney_openaq_data(sql_query_file_path = "/opt/ml/processing/sql/sydney.dml"):
     query_results_uri = athena_query_table(sql_query_file_path)
     print (f'reading {query_results_uri}')
-    raw = pd.read_csv(query_results_uri, parse_dates=['timestamp'])
+    bucket_name, key = map_s3_bucket_path(query_results_uri)
+    print(f'bucket: {bucket_name}; with key: {key}')
+    local_result_file = 'result.csv'
+    s3 = boto3.resource('s3')
+    s3.Bucket(bucket_name).download_file(key, local_result_file)
+    raw = pd.read_csv(local_result_file, parse_dates=['timestamp'])
+
     return raw
 
-def fill_missing_hours(df):
-    df = df.reset_index(level=categorical_levels, drop=True)                                    
-    index = pd.date_range(df.index.min(), df.index.max(), freq='1H')
-    return df.reindex(pd.Index(index, name='timestamp'))
-
 def featurize(raw):
+
+    def fill_missing_hours(df):
+        df = df.reset_index(level=categorical_levels, drop=True)                                    
+        index = pd.date_range(df.index.min(), df.index.max(), freq='1H')
+        return df.reindex(pd.Index(index, name='timestamp'))
+
     # Sort and index by location and time
     categorical_levels = ['country', 'city', 'location', 'parameter']
     index_levels = categorical_levels + ['timestamp']
@@ -129,24 +135,65 @@ def featurize(raw):
     
     return features
 
+def filter_dates(df, min_time, max_time, frequency):
+    min_time = None if min_time is None else pd.to_datetime(min_time)
+    max_time = None if max_time is None else pd.to_datetime(max_time)
+    interval = pd.Timedelta(frequency)
+    
+    def _filter_dates(r): 
+        if min_time is not None and r['start'] < min_time:
+            start_idx = int((min_time - r['start']) / interval)
+            r['target'] = r['target'][start_idx:]
+            r['start'] = min_time
+        
+        end_time = r['start'] + len(r['target']) * interval
+        if max_time is not None and end_time > max_time:
+            end_idx = int((end_time - max_time) / interval)
+            r['target'] = r['target'][:-end_idx]
+            
+        return r
+    
+    filtered = df.apply(_filter_dates, axis=1) 
+    filtered = filtered[filtered['target'].str.len() > 0]
+    return filtered
+
 def split_train_test_data(features, days = 30):
     train_test_split_date = date.today() - timedelta(days = days)
     train = filter_dates(features, None, train_test_split_date, '1H')
     test = filter_dates(features, train_test_split_date, None, '1H')
     return train, test
 
-raw = get_sydney_openaq_data()
-features = featurize(raw)
-train, test = split_train_test_data(features)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--split-days", type=int, default=30)
+    parser.add_argument("--region", type=str, default='us-east-1')
+    args, _ = parser.parse_known_args()
 
-# upload dataset to S3.
-local_data_path = '/opt/ml/processing/data'
-os.makedirs(local_data_path, exist_ok = True)
-train.to_json(f'{local_data_path}/train.json', orient='records', lines = True)
-train_data_uri = sagemaker_session.upload_data(path=f'{local_data_path}/train.json', key_prefix = 'preprocessing_data')
+    print("Received arguments {}".format(args))
+    split_days = args.split_days
+    region = args.region
+    
+    # definte environment variable
+    os.environ['AWS_DEFAULT_REGION'] = region
 
-test.to_json(f'{local_data_path}/test.json', orient='records', lines = True) 
-test_data_uri =  sagemaker_session.upload_data(path=f'{local_data_path}/test.json', key_prefix = 'preprocessing_data')
+    raw = get_sydney_openaq_data()
+    features = featurize(raw)
+    train, test = split_train_test_data(features)
 
-features.to_json(f'{local_data_path}/all_data.json', orient='records', lines = True)
-all_data_uri = sagemaker_session.upload_data(path=f'{local_data_path}/all_data.json', key_prefix = 'preprocessing_data')
+    all_features_output_path = os.path.join(
+        "/opt/ml/processing/output", "all_features.csv"
+    )
+    print("Saving all features to {}".format(all_features_output_path))
+    features.to_json(all_features_output_path, orient='records', lines = True)
+    
+    train_features_output_path = os.path.join(
+        "/opt/ml/processing/output", "train.csv"
+    )
+    print("Saving train features to {}".format(train_features_output_path))
+    train.to_json(train_features_output_path, orient='records', lines = True)
+
+    test_features_output_path = os.path.join(
+        "/opt/ml/processing/output", "test.csv"
+    )
+    print("Saving test features to {}".format(test_features_output_path))
+    test.to_json(test_features_output_path, orient='records', lines = True)
