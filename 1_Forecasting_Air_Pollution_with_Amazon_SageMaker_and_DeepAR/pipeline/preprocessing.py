@@ -181,19 +181,19 @@ if __name__ == "__main__":
     train, test = split_train_test_data(features)
 
     all_features_output_path = os.path.join(
-        "/opt/ml/processing/output", "all_features.csv"
+        "/opt/ml/processing/output/all", "all_features.json"
     )
     print("Saving all features to {}".format(all_features_output_path))
     features.to_json(all_features_output_path, orient='records', lines = True)
     
     train_features_output_path = os.path.join(
-        "/opt/ml/processing/output", "train.csv"
+        "/opt/ml/processing/output/train", "train.json"
     )
     print("Saving train features to {}".format(train_features_output_path))
     train.to_json(train_features_output_path, orient='records', lines = True)
 
     test_features_output_path = os.path.join(
-        "/opt/ml/processing/output", "test.csv"
+        "/opt/ml/processing/output/test", "test.json"
     )
     print("Saving test features to {}".format(test_features_output_path))
     test.to_json(test_features_output_path, orient='records', lines = True)
