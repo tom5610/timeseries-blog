@@ -1,4 +1,4 @@
-CREATE EXTERNAL TABLE openaq(
+CREATE EXTERNAL TABLE IF NOT EXISTS openaq(
   `date` struct<utc:string,local:string>, 
   `parameter` string, 
   `location` string, 

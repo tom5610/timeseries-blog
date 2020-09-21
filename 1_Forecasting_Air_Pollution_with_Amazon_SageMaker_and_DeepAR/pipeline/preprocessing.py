@@ -31,7 +31,10 @@ def get_athena_s3_staging_dir():
     account_id = session.client('sts').get_caller_identity().get('Account')
     return f's3://{account_id}-openaq-lab/athena/results/'
     
-# processing Athena
+def athena_create_table(query_file, wait=None):
+    create_table_uri = athena_execute(query_file, 'txt', wait)
+    return create_table_uri
+    
 def athena_query_table(query_file, wait=None):
     results_uri = athena_execute(query_file, 'csv', wait)
     return results_uri
@@ -176,6 +179,10 @@ if __name__ == "__main__":
     # definte environment variable
     os.environ['AWS_DEFAULT_REGION'] = region
 
+    # Create OpenAQ Athena table
+    athena_create_table('/opt/ml/processing/sql/openaq.ddl')
+    
+    # Query Sydney OpenAQ data
     raw = get_sydney_openaq_data()
     features = featurize(raw)
     train, test = split_train_test_data(features)
