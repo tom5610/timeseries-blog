@@ -13,7 +13,6 @@ Metadata:
           - NotebookName
           - NotebookInstanceType
           - VolumeSize
-          - CodeRepository
       - 
         Label: 
           default: "Notebook Lifecycle Configuration"
@@ -35,10 +34,6 @@ Parameters:
     MaxValue: 16384
     ConstraintDescription: Must be an integer between 5 (GB) and 16384 (16 TB).
     Description: Enter the size of the EBS volume in GB.
-
-  CodeRepository:
-    Type: String
-    Description: Code respository to use with notebooks
 
   NotebookInstanceType:
     Type: String
@@ -146,7 +141,7 @@ Resources:
               Effect: Allow
               Action: iam:PassRole
               Resource:
-                - !Ref 'SageMakerRole'
+                - !GetAtt "SageMakerRole.Arn"
               Condition:
                 StringEquals:
                   iam:PassedToService: sagemaker.amazonaws.com
@@ -207,7 +202,7 @@ Resources:
     Properties:
       InstanceType: !Ref NotebookInstanceType
       NotebookInstanceName: !Ref NotebookName
-      RoleArn: !GetAtt SageMakerIamRole.Arn
+      RoleArn: !GetAtt SageMakerRole.Arn
       VolumeSizeInGB: !Ref VolumeSize
       LifecycleConfigName: !GetAtt NotebookLifecycle.NotebookInstanceLifecycleConfigName
  
@@ -221,6 +216,7 @@ Resources:
     Type: AWS::ECR::Repository
     Properties: 
       RepositoryName: "air-quality-forecasting-preprocessing"
+
 Outputs:        
   AirQualityForecastingECRRepositoryName:
     Value: !Ref "AirQualityForecastingECRRepository"
