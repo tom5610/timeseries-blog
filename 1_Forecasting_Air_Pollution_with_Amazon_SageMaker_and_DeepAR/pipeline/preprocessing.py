@@ -29,7 +29,7 @@ warnings.filterwarnings('ignore')
 def get_athena_s3_staging_dir():
     session = boto3.Session()
     account_id = session.client('sts').get_caller_identity().get('Account')
-    return f's3://{account_id}-openaq-lab/athena/results/'
+    return f's3://{account_id}-openaq-forecasting/athena/results/'
     
 def athena_create_table(query_file, wait=None):
     create_table_uri = athena_execute(query_file, 'txt', wait)
