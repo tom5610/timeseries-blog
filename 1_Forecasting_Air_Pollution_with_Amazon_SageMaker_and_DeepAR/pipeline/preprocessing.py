@@ -17,12 +17,6 @@ train_test_split_date = date.today() - timedelta(days = 30)
 # and is used for aggregating and filling missing values
 frequency = '1'
 
-# prediction length is how many hours into future to predict values for
-prediction_length = 48
-
-# context length is how many prior time steps the predictor needs to make a prediction
-context_length = 3
-
 warnings.filterwarnings('ignore')
 
 
