@@ -1,0 +1,232 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: CFN template for spinning up environment for air quality forecasting pipeline workshop.
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "Notebook Configuration"
+        Parameters: 
+          - NotebookName
+          - NotebookInstanceType
+          - VolumeSize
+          - CodeRepository
+      - 
+        Label: 
+          default: "Notebook Lifecycle Configuration"
+        Parameters: 
+          - NotebookLifecycleName
+          - NotebookLifecycleOnStart
+
+Parameters:
+
+  NotebookName:
+    Type: String
+    Default: air-quality-forecasting-workshop
+    Description: Enter the name of the SageMaker notebook instance.
+
+  VolumeSize:
+    Type: Number
+    Default: 20
+    MinValue: 5
+    MaxValue: 16384
+    ConstraintDescription: Must be an integer between 5 (GB) and 16384 (16 TB).
+    Description: Enter the size of the EBS volume in GB.
+
+  CodeRepository:
+    Type: String
+    Description: Code respository to use with notebooks
+
+  NotebookInstanceType:
+    Type: String
+    Default: ml.t2.medium
+    Description: Enter the SageMaker notebook instance type. 
+
+  NotebookLifecycleName:
+    Type: String
+    Default: time-series-nb-lifecycle
+    Description: Notebook lifecycle name. 
+
+  NotebookLifecycleOnStart:
+    Type: String
+    Default: |
+      #!/bin/bash
+
+      set -e
+
+      # Install required library
+      sudo -u ec2-user -i <<'EOF'
+      echo "Install python packages in python3 kernel."
+      KERNEL=python3
+      source activate $KERNEL
+      pip install --upgrade pip
+      pip install stepfunctions "sagemaker==v1.72.0" awscli boto3
+      conda deactivate
+      EOF
+
+      # OVERVIEW
+      # This script stops a SageMaker notebook once it's idle for more than 1 hour (default time)
+      # You can change the idle time for stop using the environment variable below.
+      # If you want the notebook the stop only if no browsers are open, remove the --ignore-connections flag
+      #
+      # Note that this script will fail if either condition is not met
+      #   1. Ensure the Notebook Instance has internet connectivity to fetch the example config
+      #   2. Ensure the Notebook Instance execution role permissions to SageMaker:StopNotebookInstance to stop the notebook 
+      #       and SageMaker:DescribeNotebookInstance to describe the notebook.
+      #
+
+      # PARAMETERS
+      IDLE_TIME=7200
+
+      echo "Fetching the autostop script"
+      wget https://raw.githubusercontent.com/aws-samples/amazon-sagemaker-notebook-instance-lifecycle-config-samples/master/scripts/auto-stop-idle/autostop.py
+
+      echo "Starting the SageMaker autostop script in cron"
+
+      (crontab -l 2>/dev/null; echo "5 * * * * /usr/bin/python $PWD/autostop.py --time $IDLE_TIME --ignore-connections") | crontab -
+    Description: Notebook lifecycle onstart script. 
+
+Resources:
+  # SageMaker Execution Role
+  SageMakerRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSageMakerFullAccess"
+        - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        - "arn:aws:iam::aws:policy/AmazonAthenaFullAccess"
+        - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
+        - "arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess"
+
+  StepFunctionsWorkflowExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaRole"
+        - "arn:aws:iam::aws:policy/CloudWatchEventsFullAccess"
+      Policies:
+        - PolicyName: StepFunctionsWorkflowExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Sid: EventAccess
+              Effect: Allow
+              Action:
+                - events:PutTargets
+                - events:DescribeRule
+                - events:PutRule
+              Resource:
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTrainingJobsRule
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTransformJobsRule
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTuningJobsRule
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForECSTaskRule
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForBatchJobsRule
+            - Sid: PassRole
+              Effect: Allow
+              Action: iam:PassRole
+              Resource:
+                - !Ref 'SageMakerRole'
+              Condition:
+                StringEquals:
+                  iam:PassedToService: sagemaker.amazonaws.com
+            - Sid: GeneralAccess
+              Effect: Allow
+              Action:
+                - batch:DescribeJobs
+                - batch:SubmitJob
+                - batch:TerminateJob
+                - dynamodb:DeleteItem
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - ecs:DescribeTasks
+                - ecs:RunTask
+                - ecs:StopTask
+                - glue:BatchStopJobRun
+                - glue:GetJobRun
+                - glue:GetJobRuns
+                - glue:StartJobRun
+                - lambda:InvokeFunction
+                - sagemaker:CreateEndpoint
+                - sagemaker:CreateEndpointConfig
+                - sagemaker:CreateHyperParameterTuningJob
+                - sagemaker:CreateModel
+                - sagemaker:CreateProcessingJob
+                - sagemaker:CreateTrainingJob
+                - sagemaker:CreateTransformJob
+                - sagemaker:DeleteEndpoint
+                - sagemaker:DeleteEndpointConfig
+                - sagemaker:DescribeHyperParameterTuningJob
+                - sagemaker:DescribeProcessingJob
+                - sagemaker:DescribeTrainingJob
+                - sagemaker:DescribeTransformJob
+                - sagemaker:ListProcessingJobs
+                - sagemaker:ListTags
+                - sagemaker:StopHyperParameterTuningJob
+                - sagemaker:StopProcessingJob
+                - sagemaker:StopTrainingJob
+                - sagemaker:StopTransformJob
+                - sagemaker:UpdateEndpoint
+                - sns:Publish
+                - sqs:SendMessage
+              Resource: "*"
+
+  # SageMaker lifecycle
+  NotebookLifecycle:
+    Type: "AWS::SageMaker::NotebookInstanceLifecycleConfig"
+    Properties: 
+      NotebookInstanceLifecycleConfigName: !Ref NotebookLifecycleName
+      OnStart: 
+        - Content:
+            Fn::Base64: !Ref NotebookLifecycleOnStart
+
+  # SageMaker notebook
+  NotebookInstance:
+    Type: "AWS::SageMaker::NotebookInstance"
+    Properties:
+      InstanceType: !Ref NotebookInstanceType
+      NotebookInstanceName: !Ref NotebookName
+      RoleArn: !GetAtt SageMakerIamRole.Arn
+      VolumeSizeInGB: !Ref VolumeSize
+      LifecycleConfigName: !GetAtt NotebookLifecycle.NotebookInstanceLifecycleConfigName
+ 
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub '${AWS::AccountId}-openaq-forecasting'
+      
+  AirQualityForecastingECRRepository:
+    Type: AWS::ECR::Repository
+    Properties: 
+      RepositoryName: "air-quality-forecasting-preprocessing"
+Outputs:        
+  AirQualityForecastingECRRepositoryName:
+    Value: !Ref "AirQualityForecastingECRRepository"
+  S3Bucket:
+    Value: !Ref "S3Bucket"
+  SageMakerRole:
+    Value: !GetAtt "SageMakerRole.Arn"
+  StepFunctionsWorkflowExecutionRole:
+    Value: !GetAtt "StepFunctionsWorkflowExecutionRole.Arn"
