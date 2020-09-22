@@ -48,8 +48,8 @@ region = session.region_name
 account_id = session.client('sts').get_caller_identity().get('Account')
 bucket_name = f"{account_id}-openaq-lab"
 console_s3_uri= 'https://s3.console.aws.amazon.com/s3/object/'
-s3 = boto3.client('s3')
 
+s3 = boto3.client('s3')
 os.makedirs('model', exist_ok=True)
 urllib.request.urlretrieve('https://d8pl0xx4oqh22.cloudfront.net/model.tar.gz', 'model/model.tar.gz')
 try:
