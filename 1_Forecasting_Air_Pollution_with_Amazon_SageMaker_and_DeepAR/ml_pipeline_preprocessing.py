@@ -20,25 +20,20 @@ frequency = '1'
 warnings.filterwarnings('ignore')
 
 
-def get_athena_s3_staging_dir():
-    session = boto3.Session()
-    account_id = session.client('sts').get_caller_identity().get('Account')
-    return f's3://{account_id}-openaq-forecasting/athena/results/'
-    
-def athena_create_table(query_file, wait=None):
-    create_table_uri = athena_execute(query_file, 'txt', wait)
+def athena_create_table(bucket_name, query_file, wait=None):
+    create_table_uri = athena_execute(bucket_name, query_file, 'txt', wait)
     return create_table_uri
     
-def athena_query_table(query_file, wait=None):
-    results_uri = athena_execute(query_file, 'csv', wait)
+def athena_query_table(bucket_name, query_file, wait=None):
+    results_uri = athena_execute(bucket_name, query_file, 'csv', wait)
     return results_uri
 
-def athena_execute(query_file, ext, wait):
+def athena_execute(bucket_name, query_file, ext, wait):
     with open(query_file) as f:
         query_str = f.read()  
         
     athena = boto3.client('athena')
-    s3_dest = get_athena_s3_staging_dir()
+    s3_dest = f's3://{bucket_name}/athena/results/'
     query_id = athena.start_query_execution(
         QueryString= query_str, 
          ResultConfiguration={'OutputLocation': s3_dest}
@@ -66,8 +61,8 @@ def map_s3_bucket_path(s3_uri):
     value = pattern.match(s3_uri)
     return value.group(1), value.group(2)
 
-def get_sydney_openaq_data(sql_query_file_path = "/opt/ml/processing/sql/sydney.dml"):
-    query_results_uri = athena_query_table(sql_query_file_path)
+def get_sydney_openaq_data(bucket_name, sql_query_file_path = "/opt/ml/processing/sql/sydney.dml"):
+    query_results_uri = athena_query_table(bucket_name, sql_query_file_path)
     print (f'reading {query_results_uri}')
     bucket_name, key = map_s3_bucket_path(query_results_uri)
     print(f'bucket: {bucket_name}; with key: {key}')
@@ -164,20 +159,22 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--split-days", type=int, default=30)
     parser.add_argument("--region", type=str, default='us-east-1')
+    parser.add_argument("--bucket-name", type=str)    
     args, _ = parser.parse_known_args()
 
     print("Received arguments {}".format(args))
     split_days = args.split_days
     region = args.region
+    bucket_name = args.bucket_name
     
     # definte environment variable
     os.environ['AWS_DEFAULT_REGION'] = region
 
     # Create OpenAQ Athena table
-    athena_create_table('/opt/ml/processing/sql/openaq.ddl')
+    athena_create_table(bucket_name, '/opt/ml/processing/sql/openaq.ddl')
     
     # Query Sydney OpenAQ data
-    raw = get_sydney_openaq_data()
+    raw = get_sydney_openaq_data(bucket_name)
     features = featurize(raw)
     train, test = split_train_test_data(features)
 
