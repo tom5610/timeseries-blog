@@ -40,6 +40,7 @@ phases:
       - ACCOUNT_ID="$(echo ${CODEBUILD_BUILD_ARN} | cut -d':' -f5)"
       - processing_repository_uri=$(sh ./pipeline/get_processing_repo_uri.sh ${ACCOUNT_ID} ${AWS_DEFAULT_REGION} ${ECR_REPO_NAME})
       - echo processing_repository_uri - $processing_repository_uri
+      - echo workflow execution REQUIRE_HPO - ${REQUIRE_HPO} and REQUIRE_MODEL_TRAINING - ${REQUIRE_MODEL_TRAINING}
       - python3 ./pipeline/ml_pipeline.py --workflow-name ${WORKFLOW_NAME} --workflow-execution-role ${WORKFLOW_EXECUTION_ROLE} --processing-repository-uri ${processing_repository_uri} --require-hpo ${REQUIRE_HPO} --require-model-training ${REQUIRE_MODEL_TRAINING}
       - echo $CODEBUILD_RESOLVED_SOURCE_VERSION > commit.txt
       - echo $CODEBUILD_BUILD_ID >> commit.txt # Add build ID when commit doesn't change

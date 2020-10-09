@@ -320,12 +320,14 @@ def main(
     training_job_name = f"aqf-training-{uuid.uuid1().hex}"
     model_job_name = f"aqf-model-{uuid.uuid1().hex}"
     endpoint_job_name = f"aqf-endpoint-{uuid.uuid1().hex}"
-
+    todoHPO = require_hpo.lower() in ['true', '1', 'yes', 't']
+    todoTraining = require_model_training.lower() in ['true', '1', 'yes', 't']
+    
     execution = workflow.execute(
         inputs = {
             "PreprocessingJobName": preprocessing_job_name,
-            "ToDoHPO": require_hpo,
-            "ToDoTraining": require_model_training,
+            "ToDoHPO": todoHPO,
+            "ToDoTraining": todoTraining,
             "TrainingJobName": training_job_name,
             "TuningJobName": tuning_job_name,
             "ModelName": model_job_name,
@@ -338,8 +340,8 @@ if __name__ == "__main__":
     parser.add_argument("--workflow-name", required=True)
     parser.add_argument("--workflow-execution-role", required=True)
     parser.add_argument("--processing-repository-uri", required=True)
-    parser.add_argument("--require-hpo", type=bool, required=True)
-    parser.add_argument("--require-model-training", type=bool, required=True)
+    parser.add_argument("--require-hpo", required=True)
+    parser.add_argument("--require-model-training", required=True)
     args = vars(parser.parse_args())
     print("args: {}".format(args))
     main(**args)
